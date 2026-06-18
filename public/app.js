@@ -224,8 +224,7 @@ function createAssistantResponse() {
   sendEvent({
     type: "response.create",
     response: {
-      modalities: ["audio", "text"],
-      instructions: `Начни звонок первым и обратись к клиенту по имени: ${activeClientName}.`
+      instructions: `Скажи только: "${activeClientName}, здравствуйте. Удобно сейчас говорить?"`
     }
   });
 }
@@ -244,7 +243,7 @@ function handleRealtimeEvent(message) {
   }
 
   if (event.type === "error") {
-    setStatus(`Ошибка Realtime API: ${event.error?.message || "неизвестная ошибка"}`);
+    console.warn("Realtime API event error", event.error || event);
   }
 }
 
