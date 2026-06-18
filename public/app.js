@@ -43,10 +43,15 @@ const patronymics = [
 ];
 
 const statusLabels = {
+  hot: "горячий",
   warm: "тёплый",
+  lukewarm: "тёпленький",
+  cool: "полухолодный",
   cold: "холодный",
-  unclear: "неоднозначно"
+  unclear: "тёпленький"
 };
+
+const knownStatuses = ["hot", "warm", "lukewarm", "cool", "cold", "unclear"];
 
 let peerConnection = null;
 let dataChannel = null;
@@ -269,7 +274,7 @@ async function finishFromArguments(rawArguments, callId) {
 
   const payload = {
     name: activeClientName,
-    status: result.status || "unclear",
+    status: result.status || "lukewarm",
     interest_score: clampScore(result.interest_score),
     deal_type: clean(result.deal_type),
     budget: clean(result.budget),
@@ -334,15 +339,16 @@ function renderCards() {
 }
 
 function renderCard(lead) {
-  const status = ["warm", "cold", "unclear"].includes(lead.status) ? lead.status : "unclear";
+  const status = knownStatuses.includes(lead.status) ? lead.status : "lukewarm";
+  const visualStatus = status === "unclear" ? "lukewarm" : status;
   return `
-    <article class="lead-card ${status}">
+    <article class="lead-card ${visualStatus}">
       <div class="card-top">
         <div>
           <div class="client-name">${escapeHtml(lead.name)}</div>
           <div class="created-at">${formatDate(lead.created_at)}</div>
         </div>
-        <div class="status-pill ${status}">${statusLabels[status]}</div>
+        <div class="status-pill ${visualStatus}">${statusLabels[status]}</div>
       </div>
       <div class="meta-grid">
         ${meta("Оценка интереса", `${lead.interest_score}%`)}
