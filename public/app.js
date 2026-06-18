@@ -54,6 +54,8 @@ let microphoneStream = null;
 let activeClientName = "";
 let currentUser = null;
 let leads = [];
+let finishInProgress = false;
+let processedFunctionCalls = new Set();
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -155,6 +157,8 @@ async function startCall() {
   try {
     activeClientName = normalizeName(clientNameInput.value) || randomName();
     clientNameInput.value = activeClientName;
+    finishInProgress = false;
+    processedFunctionCalls = new Set();
     setBusy(true);
     setStatus("Запрашиваю доступ к микрофону...");
 
@@ -233,12 +237,12 @@ function handleRealtimeEvent(message) {
   const event = JSON.parse(message.data);
 
   if (event.type === "response.function_call_arguments.done") {
-    finishFromArguments(event.arguments);
+    finishFromArguments(event.arguments, event.call_id || event.item_id || event.response_id);
     return;
   }
 
   if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
-    finishFromArguments(event.item.arguments);
+    finishFromArguments(event.item.arguments, event.item.call_id || event.item.id || event.response_id);
     return;
   }
 
@@ -247,7 +251,15 @@ function handleRealtimeEvent(message) {
   }
 }
 
-async function finishFromArguments(rawArguments) {
+async function finishFromArguments(rawArguments, callId) {
+  const dedupeKey = callId || `${activeClientName}:${rawArguments}`;
+  if (finishInProgress || processedFunctionCalls.has(dedupeKey)) {
+    return;
+  }
+
+  finishInProgress = true;
+  processedFunctionCalls.add(dedupeKey);
+
   let result;
   try {
     result = typeof rawArguments === "string" ? JSON.parse(rawArguments) : rawArguments;
@@ -272,7 +284,9 @@ async function finishFromArguments(rawArguments) {
       method: "POST",
       body: payload
     });
-    leads.unshift(data.lead);
+    if (!data.duplicate && !leads.some((lead) => lead.id === data.lead.id)) {
+      leads.unshift(data.lead);
+    }
     renderCards();
     setStatus(`База обновлена: ${data.lead.name} — ${statusLabels[data.lead.status]}.`);
     clientNameInput.value = randomName();
@@ -332,7 +346,7 @@ function renderCard(lead) {
       </div>
       <div class="meta-grid">
         ${meta("Оценка интереса", `${lead.interest_score}%`)}
-        ${meta("Покупка или аренда", lead.deal_type)}
+        ${meta("Тип сделки", lead.deal_type)}
         ${meta("Бюджет", lead.budget)}
         ${meta("Район", lead.district)}
         ${meta("Срок", lead.timeline)}

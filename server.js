@@ -156,9 +156,9 @@ function buildInstructions(clientName) {
 
 Клиента зовут: ${clientName}.
 
-Цель звонка: естественно и коротко понять, есть ли у клиента интерес к недвижимости. Если интерес есть, собери только минимум:
-- покупка или аренда;
-- примерный бюджет;
+Цель звонка: естественно и коротко понять, есть ли у клиента интерес к недвижимости. Интересом считается покупка, аренда или продажа объекта. Если интерес есть, собери только минимум:
+- покупка, аренда или продажа;
+- примерный бюджет или желаемая цена;
 - район;
 - срок.
 
@@ -177,9 +177,11 @@ function buildInstructions(clientName) {
 - Если клиент грубит, не заинтересован или занят, спокойно заверши разговор.
 - Если клиент просит перезвонить позже, отметь это в сроке или резюме и заверши.
 - Если клиент заинтересован, задай 1-3 коротких уточняющих вопроса и заверши.
-- Когда информации достаточно, скажи примерно: "Понял вас, ${clientName}. Спасибо за информацию. Хорошего дня."
+- Если клиент хочет продать квартиру или дом, это теплый лид. Не спорь с ценой, даже если она выглядит странно. Скажи коротко: "Понял вас. Передам специалисту, с вами свяжутся."
+- Перед вызовом инструмента обязательно произнеси финальную фразу голосом. Не вызывай инструмент молча.
+- Когда информации достаточно, скажи примерно: "Понял вас, ${clientName}. Передам специалисту, с вами свяжутся. Хорошего дня."
 - После финальной фразы обязательно вызови инструмент finish_call с итоговой квалификацией.
-- Статус "warm" ставь только если есть реальный интерес к покупке или аренде. "unclear" ставь, если клиент не отказался, но данных мало или просит позже. "cold" ставь при отказе, грубости, отсутствии интереса.
+- Статус "warm" ставь если есть реальный интерес к покупке, аренде или продаже недвижимости. "unclear" ставь, если клиент не отказался, но данных мало или просит позже. "cold" ставь при отказе, грубости, отсутствии интереса.
 `.trim();
 }
 
@@ -198,8 +200,8 @@ function buildTool() {
           description: "Итог: теплый, холодный или неоднозначный клиент."
         },
         interest_score: { type: "integer", minimum: 0, maximum: 100 },
-        deal_type: { type: "string", description: "Покупка, аренда, неизвестно или неактуально." },
-        budget: { type: "string", description: "Примерный бюджет или 'неизвестно'." },
+        deal_type: { type: "string", description: "Покупка, аренда, продажа, неизвестно или неактуально." },
+        budget: { type: "string", description: "Примерный бюджет, желаемая цена или 'неизвестно'." },
         district: { type: "string", description: "Район или 'неизвестно'." },
         timeline: { type: "string", description: "Срок или договоренность о перезвоне." },
         summary: { type: "string", description: "Краткое резюме разговора в 1-2 предложениях." },
@@ -318,6 +320,27 @@ function cleanLead(input, userId) {
   };
 }
 
+function isDuplicateLead(previous, next) {
+  if (!previous) {
+    return false;
+  }
+
+  const previousTime = new Date(previous.created_at).getTime();
+  const isRecent = Number.isFinite(previousTime) && Date.now() - previousTime < 10_000;
+
+  return (
+    isRecent &&
+    previous.name === next.name &&
+    previous.status === next.status &&
+    previous.deal_type === next.deal_type &&
+    previous.budget === next.budget &&
+    previous.district === next.district &&
+    previous.timeline === next.timeline &&
+    previous.summary === next.summary &&
+    previous.reason === next.reason
+  );
+}
+
 async function handleLeads(req, res) {
   const user = await requireUser(req, res);
   if (!user) {
@@ -335,6 +358,12 @@ async function handleLeads(req, res) {
   if (req.method === "POST") {
     const input = await readBody(req);
     const lead = cleanLead(input, user.id);
+    const existing = db.leads[user.id][0];
+    if (isDuplicateLead(existing, lead)) {
+      json(res, 200, { lead: existing, duplicate: true });
+      return;
+    }
+
     db.leads[user.id].unshift(lead);
     await saveDb();
     json(res, 201, { lead });
