@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Демонстрация AI-риелтора</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="intro">
+        <div>
+          <p class="eyebrow">Голосовой прозвон</p>
+          <h1>Демонстрация AI-риелтора</h1>
+          <p class="description">
+            Представьте, что вы человек из холодной базы агентства недвижимости. AI
+            знает только ваше имя. Общайтесь как хотите. Его задача — понять, есть ли
+            у вас интерес к недвижимости.
+          </p>
+        </div>
+        <div class="account-box" id="accountBox" hidden>
+          <span id="accountEmail"></span>
+          <button id="logoutButton" class="secondary-button compact" type="button">Выйти</button>
+        </div>
+      </section>
+
+      <section class="auth-panel" id="authPanel" aria-label="Вход">
+        <div>
+          <p class="eyebrow">Аккаунт</p>
+          <h2>Вход в рабочую базу</h2>
+          <p class="panel-copy">
+            Регистрация сразу авторизует пользователя. У каждого e-mail своя база
+            звонков и карточек.
+          </p>
+        </div>
+
+        <form id="authForm" class="auth-form">
+          <label for="email">E-mail</label>
+          <input id="email" type="email" autocomplete="email" required />
+
+          <label for="password">Пароль</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+
+          <div class="actions">
+            <button id="loginButton" class="primary-button" type="submit">Войти</button>
+            <button id="registerButton" class="secondary-button" type="button">Регистрация</button>
+          </div>
+        </form>
+        <div class="status-line" id="authStatus">Войдите или создайте аккаунт.</div>
+      </section>
+
+      <section class="call-panel app-only" aria-label="Панель звонка" hidden>
+        <label for="clientName">Имя клиента</label>
+        <div class="name-row">
+          <input id="clientName" value="Виктор Викторович" autocomplete="off" />
+          <button id="randomNameButton" class="icon-button" type="button" title="Случайное имя">
+            ↻
+          </button>
+        </div>
+
+        <div class="actions">
+          <button id="startButton" class="primary-button" type="button">🎤 Начать звонок</button>
+          <button id="endButton" class="secondary-button" type="button" disabled>Завершить</button>
+        </div>
+
+        <div class="status-line" id="statusLine">Готов к демо-звонку.</div>
+        <audio id="remoteAudio" autoplay></audio>
+      </section>
+
+      <section class="report app-only" hidden>
+        <div class="report-head">
+          <div>
+            <p class="eyebrow">База данных</p>
+            <h2>Клиенты после прозвона</h2>
+          </div>
+          <button id="clearButton" class="secondary-button" type="button">Очистить</button>
+        </div>
+        <div id="cards" class="cards">
+          <div class="empty-state">После звонка здесь появится первая запись.</div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
