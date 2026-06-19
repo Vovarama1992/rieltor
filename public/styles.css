@@ -47,7 +47,8 @@ input {
 .intro,
 .auth-panel,
 .call-panel,
-.report {
+.report,
+.recordings-panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -222,6 +223,11 @@ button:disabled {
   padding: 24px;
 }
 
+.recordings-panel {
+  grid-column: 1 / -1;
+  padding: 24px;
+}
+
 .report-head {
   display: flex;
   align-items: center;
@@ -231,6 +237,11 @@ button:disabled {
 }
 
 .cards {
+  display: grid;
+  gap: 12px;
+}
+
+.recordings {
   display: grid;
   gap: 12px;
 }
@@ -352,6 +363,32 @@ button:disabled {
   line-height: 1.45;
 }
 
+.recording-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.recording-title {
+  font-weight: 850;
+}
+
+.recording-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.recording-item audio {
+  width: 100%;
+}
+
 @media (max-width: 860px) {
   .app {
     grid-template-columns: 1fr;
@@ -369,7 +406,8 @@ button:disabled {
   .intro,
   .auth-panel,
   .call-panel,
-  .report {
+  .report,
+  .recordings-panel {
     padding: 20px;
   }
 }
@@ -387,6 +425,10 @@ button:disabled {
   }
 
   .meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .recording-item {
     grid-template-columns: 1fr;
   }
 }

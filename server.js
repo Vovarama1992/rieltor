@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(__dirname, "public");
 const dataDir = join(__dirname, "data");
+const recordingsDir = join(dataDir, "recordings");
 const dbPath = join(dataDir, "db.json");
 const port = Number(process.env.PORT || 3000);
 
@@ -81,6 +82,21 @@ async function readBody(req) {
   return body ? JSON.parse(body) : {};
 }
 
+async function readRawBody(req, limit = 50_000_000) {
+  const chunks = [];
+  let size = 0;
+
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) {
+      throw new Error("Request body is too large");
+    }
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks);
+}
+
 async function loadDb() {
   if (dbCache) {
     return dbCache;
@@ -89,13 +105,14 @@ async function loadDb() {
   try {
     dbCache = JSON.parse(await readFile(dbPath, "utf8"));
   } catch {
-    dbCache = { users: [], sessions: {}, leads: {} };
+    dbCache = { users: [], sessions: {}, leads: {}, recordings: {} };
     await saveDb();
   }
 
   dbCache.users ||= [];
   dbCache.sessions ||= {};
   dbCache.leads ||= {};
+  dbCache.recordings ||= {};
   return dbCache;
 }
 
@@ -350,6 +367,14 @@ function cleanLead(input, userId) {
   };
 }
 
+function decodeHeaderValue(value, fallback = "") {
+  try {
+    return decodeURIComponent(String(value || fallback));
+  } catch {
+    return String(value || fallback);
+  }
+}
+
 function isDuplicateLead(previous, next) {
   if (!previous) {
     return false;
@@ -410,6 +435,87 @@ async function handleLeads(req, res) {
   json(res, 405, { error: "Method not allowed" });
 }
 
+async function handleRecordings(req, res) {
+  const user = await requireUser(req, res);
+  if (!user) {
+    return;
+  }
+
+  const db = await loadDb();
+  db.recordings[user.id] ||= [];
+
+  if (req.method === "GET") {
+    json(res, 200, { recordings: db.recordings[user.id] });
+    return;
+  }
+
+  if (req.method === "POST") {
+    const audio = await readRawBody(req);
+    if (!audio.length) {
+      json(res, 400, { error: "Пустая запись." });
+      return;
+    }
+
+    const id = crypto.randomUUID();
+    const userDir = join(recordingsDir, user.id);
+    const fileName = `${id}.webm`;
+    const filePath = join(userDir, fileName);
+    const recording = {
+      id,
+      userId: user.id,
+      clientName: decodeHeaderValue(req.headers["x-client-name"], "Неизвестный клиент").slice(0, 80),
+      mimeType: String(req.headers["content-type"] || "audio/webm").slice(0, 80),
+      size: audio.length,
+      url: `/recordings/${id}`,
+      created_at: new Date().toISOString()
+    };
+
+    await mkdir(userDir, { recursive: true });
+    await writeFile(filePath, audio);
+    db.recordings[user.id].unshift(recording);
+    await saveDb();
+    json(res, 201, { recording });
+    return;
+  }
+
+  if (req.method === "DELETE") {
+    db.recordings[user.id] = [];
+    await saveDb();
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  json(res, 405, { error: "Method not allowed" });
+}
+
+async function serveRecording(req, res, id) {
+  const user = await requireUser(req, res);
+  if (!user) {
+    return;
+  }
+
+  const db = await loadDb();
+  const recording = (db.recordings[user.id] || []).find((item) => item.id === id);
+  if (!recording) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+    return;
+  }
+
+  try {
+    const audio = await readFile(join(recordingsDir, user.id, `${id}.webm`));
+    res.writeHead(200, {
+      "Content-Type": recording.mimeType || "audio/webm",
+      "Content-Length": audio.length,
+      "Cache-Control": "private, max-age=3600"
+    });
+    res.end(audio);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
+}
+
 async function handleToken(req, res) {
   if (req.method !== "POST") {
     json(res, 405, { error: "Method not allowed" });
@@ -451,7 +557,7 @@ async function handleToken(req, res) {
             input: {
               turn_detection: {
                 type: "server_vad",
-                silence_duration_ms: 650
+                silence_duration_ms: 350
               }
             },
             output: {
@@ -509,12 +615,18 @@ const routes = {
   "/api/logout": handleLogout,
   "/api/me": handleMe,
   "/api/leads": handleLeads,
+  "/api/recordings": handleRecordings,
   "/token": handleToken
 };
 
 const server = createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, `http://${req.headers.host}`).pathname;
+    if (pathname.startsWith("/recordings/")) {
+      await serveRecording(req, res, pathname.split("/").pop());
+      return;
+    }
+
     const route = routes[pathname];
 
     if (route) {

@@ -16,6 +16,7 @@ const randomNameButton = document.querySelector("#randomNameButton");
 const clientNameInput = document.querySelector("#clientName");
 const statusLine = document.querySelector("#statusLine");
 const cards = document.querySelector("#cards");
+const recordingsList = document.querySelector("#recordings");
 const remoteAudio = document.querySelector("#remoteAudio");
 
 const firstNames = [
@@ -59,8 +60,14 @@ let microphoneStream = null;
 let activeClientName = "";
 let currentUser = null;
 let leads = [];
+let recordings = [];
 let finishInProgress = false;
 let processedFunctionCalls = new Set();
+let audioContext = null;
+let recordingDestination = null;
+let mediaRecorder = null;
+let recordingChunks = [];
+let recordingMimeType = "";
 
 authForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -115,6 +122,7 @@ async function logout() {
   await api("/api/logout", { method: "POST" }).catch(() => null);
   currentUser = null;
   leads = [];
+  recordings = [];
   passwordInput.value = "";
   renderAuth();
 }
@@ -128,7 +136,7 @@ async function enterApp(user) {
     section.hidden = false;
   });
   setStatus("Готов к прозвону. Нажмите кнопку, AI начнёт разговор первым.");
-  await loadLeads();
+  await Promise.all([loadLeads(), loadRecordings()]);
 }
 
 function renderAuth() {
@@ -139,12 +147,19 @@ function renderAuth() {
   });
   setAuthStatus("Войдите или создайте аккаунт.");
   renderCards();
+  renderRecordings();
 }
 
 async function loadLeads() {
   const data = await api("/api/leads");
   leads = data.leads || [];
   renderCards();
+}
+
+async function loadRecordings() {
+  const data = await api("/api/recordings");
+  recordings = data.recordings || [];
+  renderRecordings();
 }
 
 async function clearLeads() {
@@ -174,6 +189,7 @@ async function startCall() {
         autoGainControl: true
       }
     });
+    await startRecording(microphoneStream);
 
     setStatus("Создаю голосовую Realtime-сессию...");
     const tokenData = await api("/token", {
@@ -188,7 +204,9 @@ async function startCall() {
 
     peerConnection = new RTCPeerConnection();
     peerConnection.ontrack = (event) => {
-      remoteAudio.srcObject = event.streams[0];
+      const [remoteStream] = event.streams;
+      remoteAudio.srcObject = remoteStream;
+      connectRemoteAudioToRecording(remoteStream);
     };
 
     for (const track of microphoneStream.getAudioTracks()) {
@@ -309,6 +327,7 @@ function sendEvent(event) {
 }
 
 function stopCall(message) {
+  stopRecording();
   dataChannel?.close();
   peerConnection?.close();
   microphoneStream?.getTracks().forEach((track) => track.stop());
@@ -324,6 +343,102 @@ function stopCall(message) {
   }
 }
 
+async function startRecording(stream) {
+  if (!window.MediaRecorder) {
+    console.warn("MediaRecorder is not supported in this browser");
+    return;
+  }
+
+  audioContext = new AudioContext();
+  await audioContext.resume();
+  recordingDestination = audioContext.createMediaStreamDestination();
+  const microphoneSource = audioContext.createMediaStreamSource(stream);
+  microphoneSource.connect(recordingDestination);
+
+  recordingChunks = [];
+  recordingMimeType = chooseRecordingMimeType();
+  mediaRecorder = new MediaRecorder(
+    recordingDestination.stream,
+    recordingMimeType ? { mimeType: recordingMimeType } : undefined
+  );
+  recordingMimeType = mediaRecorder.mimeType || recordingMimeType || "audio/webm";
+
+  mediaRecorder.addEventListener("dataavailable", (event) => {
+    if (event.data?.size) {
+      recordingChunks.push(event.data);
+    }
+  });
+
+  mediaRecorder.addEventListener("stop", () => {
+    const chunks = recordingChunks;
+    const mimeType = recordingMimeType;
+    const clientName = activeClientName;
+    recordingChunks = [];
+    uploadRecording(chunks, mimeType, clientName);
+  });
+
+  mediaRecorder.start(1000);
+}
+
+function connectRemoteAudioToRecording(stream) {
+  if (!audioContext || !recordingDestination || !stream) {
+    return;
+  }
+
+  try {
+    const remoteSource = audioContext.createMediaStreamSource(stream);
+    remoteSource.connect(recordingDestination);
+  } catch (error) {
+    console.warn("Failed to connect remote audio to recording", error);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder?.state === "recording") {
+    mediaRecorder.stop();
+  }
+
+  window.setTimeout(() => {
+    audioContext?.close().catch(() => null);
+    audioContext = null;
+    recordingDestination = null;
+    mediaRecorder = null;
+  }, 500);
+}
+
+async function uploadRecording(chunks, mimeType, clientName) {
+  const size = chunks.reduce((total, chunk) => total + chunk.size, 0);
+  if (!size) {
+    return;
+  }
+
+  try {
+    const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+    const response = await fetch("/api/recordings", {
+      method: "POST",
+      headers: {
+        "Content-Type": blob.type || "audio/webm",
+        "X-Client-Name": encodeURIComponent(clientName || "Неизвестный клиент")
+      },
+      body: blob
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "Не удалось сохранить запись.");
+    }
+
+    recordings.unshift(data.recording);
+    renderRecordings();
+  } catch (error) {
+    console.warn("Recording upload failed", error);
+  }
+}
+
+function chooseRecordingMimeType() {
+  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
+  return types.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
 function renderCards() {
   if (!currentUser) {
     cards.innerHTML = "";
@@ -336,6 +451,32 @@ function renderCards() {
   }
 
   cards.innerHTML = leads.map(renderCard).join("");
+}
+
+function renderRecordings() {
+  if (!currentUser) {
+    recordingsList.innerHTML = "";
+    return;
+  }
+
+  if (!recordings.length) {
+    recordingsList.innerHTML = '<div class="empty-state">После звонка здесь появится аудиозапись.</div>';
+    return;
+  }
+
+  recordingsList.innerHTML = recordings.map(renderRecording).join("");
+}
+
+function renderRecording(recording) {
+  return `
+    <article class="recording-item">
+      <div>
+        <div class="recording-title">${escapeHtml(recording.clientName || "Звонок")}</div>
+        <div class="recording-meta">${formatDate(recording.created_at)} · ${formatBytes(recording.size)}</div>
+      </div>
+      <audio controls preload="none" src="${escapeHtml(recording.url)}"></audio>
+    </article>
+  `;
 }
 
 function renderCard(lead) {
@@ -434,6 +575,19 @@ function formatDate(value) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 КБ";
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${Math.round(bytes / 1024)} КБ`;
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
 }
 
 function escapeHtml(value) {
